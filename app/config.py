@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     ]
     
     # Simulation date range
-    SIMULATION_START_DATE: str = "2025-03-01"
+    SIMULATION_START_DATE: str = "2025-06-01"
     SIMULATION_END_DATE: str = "2025-12-31"
     
     # Pagination
