@@ -151,6 +151,142 @@ def forecast_mbu_demand(
     }
 
 
+class ComprehensiveForecastRequest(BaseModel):
+    """Request body for comprehensive forecast endpoint."""
+    district: str
+    forecast_from: date
+    horizon_days: int = 14
+
+
+@router.post("/comprehensive")
+def forecast_comprehensive(
+    request: ComprehensiveForecastRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate comprehensive forecasts for all three data types (enrollment, demographic, biometric).
+    
+    Returns historical actual data and predictions for each type to compare model accuracy.
+    """
+    is_valid, error_msg = validate_simulation_date(request.forecast_from)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    from app.services.enrollment_service import EnrollmentService
+    from app.services.demographic_service import DemographicService
+    
+    biometric_service = BiometricService(db)
+    enrollment_service = EnrollmentService(db)
+    demographic_service = DemographicService(db)
+    
+    def generate_forecast(historical_df: pd.DataFrame, forecast_from: date, horizon_days: int):
+        """Generate simple trend + seasonality forecast."""
+        if len(historical_df) < 7:
+            return [], []
+        
+        values = historical_df['total'].values
+        mean_value = values.mean()
+        std_value = values.std() if len(values) > 1 else mean_value * 0.2
+        
+        # Calculate trend
+        trend = 0
+        if len(values) >= 14:
+            trend = (values[-7:].mean() - values[:7].mean()) / max(len(values) - 7, 1)
+        
+        # Convert historical to list
+        historical = [
+            {
+                "date": row['date'].isoformat() if hasattr(row['date'], 'isoformat') else str(row['date']),
+                "actual": int(row['total'])
+            }
+            for _, row in historical_df.iterrows()
+        ]
+        
+        # Generate forecast
+        forecast = []
+        for i in range(horizon_days):
+            forecast_date = forecast_from + timedelta(days=i+1)
+            predicted = mean_value + (trend * i)
+            
+            # Weekly seasonality
+            day_of_week = forecast_date.weekday()
+            if day_of_week in [5, 6]:
+                predicted *= 0.7
+            
+            predicted = max(0, predicted)
+            lower = max(0, predicted - 1.96 * std_value)
+            upper = predicted + 1.96 * std_value
+            
+            forecast.append({
+                "date": forecast_date.isoformat(),
+                "predicted": round(predicted, 0),
+                "lower_bound": round(lower, 0),
+                "upper_bound": round(upper, 0)
+            })
+        
+        return historical, forecast
+    
+    results = {
+        "district": request.district,
+        "forecast_from": request.forecast_from.isoformat(),
+        "horizon_days": request.horizon_days,
+        "data_types": {}
+    }
+    
+    # Enrollment forecast
+    try:
+        enrollment_df = enrollment_service.get_historical_data_for_forecast(
+            district=request.district,
+            end_date=request.forecast_from,
+            days_back=90
+        )
+        hist, fcst = generate_forecast(enrollment_df, request.forecast_from, request.horizon_days)
+        results["data_types"]["enrollment"] = {
+            "historical": hist,
+            "forecast": fcst,
+            "training_days": len(enrollment_df),
+            "historical_mean": round(enrollment_df['total'].mean(), 0) if len(enrollment_df) > 0 else 0
+        }
+    except Exception as e:
+        results["data_types"]["enrollment"] = {"error": str(e), "historical": [], "forecast": []}
+    
+    # Demographic forecast
+    try:
+        demographic_df = demographic_service.get_historical_data_for_forecast(
+            district=request.district,
+            end_date=request.forecast_from,
+            days_back=90
+        )
+        hist, fcst = generate_forecast(demographic_df, request.forecast_from, request.horizon_days)
+        results["data_types"]["demographic"] = {
+            "historical": hist,
+            "forecast": fcst,
+            "training_days": len(demographic_df),
+            "historical_mean": round(demographic_df['total'].mean(), 0) if len(demographic_df) > 0 else 0
+        }
+    except Exception as e:
+        results["data_types"]["demographic"] = {"error": str(e), "historical": [], "forecast": []}
+    
+    # Biometric forecast
+    try:
+        biometric_df = biometric_service.get_historical_data_for_forecast(
+            district=request.district,
+            end_date=request.forecast_from,
+            days_back=90
+        )
+        hist, fcst = generate_forecast(biometric_df, request.forecast_from, request.horizon_days)
+        results["data_types"]["biometric"] = {
+            "historical": hist,
+            "forecast": fcst,
+            "training_days": len(biometric_df),
+            "historical_mean": round(biometric_df['total'].mean(), 0) if len(biometric_df) > 0 else 0
+        }
+    except Exception as e:
+        results["data_types"]["biometric"] = {"error": str(e), "historical": [], "forecast": []}
+    
+    return results
+
+
 @router.get("/trends")
 def get_forecast_trends(
     simulation_date: date = Query(...),

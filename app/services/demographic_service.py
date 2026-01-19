@@ -230,3 +230,32 @@ class DemographicService:
             })
         
         return districts
+    
+    def get_historical_data_for_forecast(
+        self,
+        district: str,
+        end_date: date,
+        days_back: int = 180
+    ) -> pd.DataFrame:
+        """Get historical demographic update data for ML forecasting."""
+        start_date = end_date - timedelta(days=days_back)
+        
+        results = self.db.query(
+            DemographicUpdate.date,
+            func.sum(DemographicUpdate.total).label('total'),
+            func.sum(DemographicUpdate.demo_age_5_17).label('demo_age_5_17'),
+            func.sum(DemographicUpdate.demo_age_17_plus).label('demo_age_17_plus')
+        ).filter(
+            DemographicUpdate.district == district,
+            DemographicUpdate.date >= start_date,
+            DemographicUpdate.date <= end_date
+        ).group_by(DemographicUpdate.date).order_by(DemographicUpdate.date).all()
+        
+        df = pd.DataFrame([{
+            'date': r.date,
+            'total': int(r.total or 0),
+            'demo_age_5_17': int(r.demo_age_5_17 or 0),
+            'demo_age_17_plus': int(r.demo_age_17_plus or 0)
+        } for r in results])
+        
+        return df

@@ -263,3 +263,34 @@ class EnrollmentService:
             query = query.filter(Enrollment.state == state)
         districts = query.order_by(Enrollment.district).all()
         return [d[0] for d in districts]
+    
+    def get_historical_data_for_forecast(
+        self,
+        district: str,
+        end_date: date,
+        days_back: int = 180
+    ) -> pd.DataFrame:
+        """Get historical enrollment data for ML forecasting."""
+        start_date = end_date - timedelta(days=days_back)
+        
+        results = self.db.query(
+            Enrollment.date,
+            func.sum(Enrollment.total).label('total'),
+            func.sum(Enrollment.age_0_5).label('age_0_5'),
+            func.sum(Enrollment.age_5_17).label('age_5_17'),
+            func.sum(Enrollment.age_18_plus).label('age_18_plus')
+        ).filter(
+            Enrollment.district == district,
+            Enrollment.date >= start_date,
+            Enrollment.date <= end_date
+        ).group_by(Enrollment.date).order_by(Enrollment.date).all()
+        
+        df = pd.DataFrame([{
+            'date': r.date,
+            'total': int(r.total or 0),
+            'age_0_5': int(r.age_0_5 or 0),
+            'age_5_17': int(r.age_5_17 or 0),
+            'age_18_plus': int(r.age_18_plus or 0)
+        } for r in results])
+        
+        return df
