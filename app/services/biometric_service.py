@@ -80,86 +80,108 @@ class BiometricService:
         
         return agg_df.to_dict('records')
     
-    def get_summary(self, simulation_date: date) -> Dict[str, Any]:
+    def get_summary(
+        self,
+        simulation_date: date,
+        state: Optional[str] = None,
+        district: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Calculate KPI summary for biometric updates.
         Includes MBU (Mandatory Biometric Update) specific metrics.
         
         Args:
             simulation_date: The simulated current date
+            state: Optional state filter
+            district: Optional district filter
             
         Returns:
             Dictionary with biometric update summary KPIs
         """
         # Last 30 days
         date_30d_ago = simulation_date - timedelta(days=30)
+        
+        # Build base query with optional filters
+        base_filter = [
+            BiometricUpdate.date >= date_30d_ago,
+            BiometricUpdate.date <= simulation_date
+        ]
+        if state:
+            base_filter.append(BiometricUpdate.state == state)
+        if district:
+            base_filter.append(BiometricUpdate.district == district)
+        
         updates_30d = self.db.query(
             func.sum(BiometricUpdate.total),
             func.sum(BiometricUpdate.bio_age_5_17),
             func.sum(BiometricUpdate.bio_age_17_plus)
-        ).filter(
-            BiometricUpdate.date >= date_30d_ago,
-            BiometricUpdate.date <= simulation_date
-        ).first()
+        ).filter(*base_filter).first()
         
         # Last 7 days
         date_7d_ago = simulation_date - timedelta(days=7)
-        updates_7d = self.db.query(
-            func.sum(BiometricUpdate.total)
-        ).filter(
+        filter_7d = [
             BiometricUpdate.date >= date_7d_ago,
             BiometricUpdate.date <= simulation_date
-        ).scalar() or 0
+        ]
+        if state:
+            filter_7d.append(BiometricUpdate.state == state)
+        if district:
+            filter_7d.append(BiometricUpdate.district == district)
+        
+        updates_7d = self.db.query(
+            func.sum(BiometricUpdate.total)
+        ).filter(*filter_7d).scalar() or 0
         
         # Today
+        filter_today = [BiometricUpdate.date == simulation_date]
+        if state:
+            filter_today.append(BiometricUpdate.state == state)
+        if district:
+            filter_today.append(BiometricUpdate.district == district)
+        
         updates_today = self.db.query(
             func.sum(BiometricUpdate.total)
-        ).filter(
-            BiometricUpdate.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
-        # Active districts and states
+        # Active districts and states (within filter)
         active_districts = self.db.query(
             func.count(func.distinct(BiometricUpdate.district))
-        ).filter(
-            BiometricUpdate.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
         active_states = self.db.query(
             func.count(func.distinct(BiometricUpdate.state))
-        ).filter(
-            BiometricUpdate.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
-        # Top 5 states
-        top_states = self.db.query(
-            BiometricUpdate.state,
-            func.sum(BiometricUpdate.total).label('total')
-        ).filter(
-            BiometricUpdate.date >= date_30d_ago,
-            BiometricUpdate.date <= simulation_date
-        ).group_by(BiometricUpdate.state).order_by(
-            func.sum(BiometricUpdate.total).desc()
-        ).limit(5).all()
-        
-        total_30d = int(updates_30d[0] or 0)
-        
+        # Top 5 states (only if no state filter)
         top_states_list = []
-        for s in top_states:
-            percentage = (s.total / total_30d * 100) if total_30d > 0 else 0
-            top_states_list.append({
-                "state": s.state,
-                "count": int(s.total),
-                "percentage": round(percentage, 2)
-            })
+        total_30d = int(updates_30d[0] or 0)
+        if not state:
+            top_states = self.db.query(
+                BiometricUpdate.state,
+                func.sum(BiometricUpdate.total).label('total')
+            ).filter(*base_filter).group_by(BiometricUpdate.state).order_by(
+                func.sum(BiometricUpdate.total).desc()
+            ).limit(5).all()
+            
+            for s in top_states:
+                percentage = (s.total / total_30d * 100) if total_30d > 0 else 0
+                top_states_list.append({
+                    "state": s.state,
+                    "count": int(s.total),
+                    "percentage": round(percentage, 2)
+                })
         
         # Calculate MBU metrics
-        # Get total 5-17 age group enrollments
+        # Get total 5-17 age group enrollments (with filters if applicable)
+        enrollment_filter = [Enrollment.date <= simulation_date]
+        if state:
+            enrollment_filter.append(Enrollment.state == state)
+        if district:
+            enrollment_filter.append(Enrollment.district == district)
+            
         total_5_17_enrolled = self.db.query(
             func.sum(Enrollment.age_5_17)
-        ).filter(
-            Enrollment.date <= simulation_date
-        ).scalar() or 0
+        ).filter(*enrollment_filter).scalar() or 0
         
         # Estimate: ~15% of 5-17 will need MBU in next 6 months (approaching 15)
         pending_mbu_estimate = int(total_5_17_enrolled * 0.15)
@@ -181,7 +203,9 @@ class BiometricService:
             "age_5_17_total": int(updates_30d[1] or 0),
             "age_17_plus_total": int(updates_30d[2] or 0),
             "pending_mbu_estimate": pending_mbu_estimate,
-            "mbu_completion_rate": round(mbu_completion_rate, 2)
+            "mbu_completion_rate": round(mbu_completion_rate, 2),
+            "state_filter": state,
+            "district_filter": district
         }
     
     def get_by_district_with_risk(

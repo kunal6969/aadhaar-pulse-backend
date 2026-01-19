@@ -76,19 +76,22 @@ def get_biometric_trends(
 @router.get("/summary")
 def get_biometric_summary(
     simulation_date: date = Query(..., description="Simulated current date"),
+    state: Optional[str] = Query(None, description="Filter by state"),
+    district: Optional[str] = Query(None, description="Filter by district"),
     db: Session = Depends(get_db)
 ):
     """
     Get KPI summary for biometric updates.
     
     Includes MBU (Mandatory Biometric Update) specific metrics.
+    Can be filtered by state/district.
     """
     is_valid, error_msg = validate_simulation_date(simulation_date)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error_msg)
     
     service = BiometricService(db)
-    summary = service.get_summary(simulation_date)
+    summary = service.get_summary(simulation_date, state=state, district=district)
     
     return summary
 

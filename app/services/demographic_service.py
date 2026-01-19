@@ -79,80 +79,98 @@ class DemographicService:
         
         return agg_df.to_dict('records')
     
-    def get_summary(self, simulation_date: date) -> Dict[str, Any]:
+    def get_summary(
+        self,
+        simulation_date: date,
+        state: Optional[str] = None,
+        district: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Calculate KPI summary for demographic updates.
         
         Args:
             simulation_date: The simulated current date
+            state: Optional state filter
+            district: Optional district filter
             
         Returns:
             Dictionary with demographic update summary KPIs
         """
         # Last 30 days
         date_30d_ago = simulation_date - timedelta(days=30)
+        
+        # Build base query with optional filters
+        base_filter = [
+            DemographicUpdate.date >= date_30d_ago,
+            DemographicUpdate.date <= simulation_date
+        ]
+        if state:
+            base_filter.append(DemographicUpdate.state == state)
+        if district:
+            base_filter.append(DemographicUpdate.district == district)
+        
         updates_30d = self.db.query(
             func.sum(DemographicUpdate.total),
             func.sum(DemographicUpdate.demo_age_5_17),
             func.sum(DemographicUpdate.demo_age_17_plus)
-        ).filter(
-            DemographicUpdate.date >= date_30d_ago,
-            DemographicUpdate.date <= simulation_date
-        ).first()
+        ).filter(*base_filter).first()
         
         # Last 7 days
         date_7d_ago = simulation_date - timedelta(days=7)
-        updates_7d = self.db.query(
-            func.sum(DemographicUpdate.total)
-        ).filter(
+        filter_7d = [
             DemographicUpdate.date >= date_7d_ago,
             DemographicUpdate.date <= simulation_date
-        ).scalar() or 0
+        ]
+        if state:
+            filter_7d.append(DemographicUpdate.state == state)
+        if district:
+            filter_7d.append(DemographicUpdate.district == district)
+        
+        updates_7d = self.db.query(
+            func.sum(DemographicUpdate.total)
+        ).filter(*filter_7d).scalar() or 0
         
         # Today
+        filter_today = [DemographicUpdate.date == simulation_date]
+        if state:
+            filter_today.append(DemographicUpdate.state == state)
+        if district:
+            filter_today.append(DemographicUpdate.district == district)
+        
         updates_today = self.db.query(
             func.sum(DemographicUpdate.total)
-        ).filter(
-            DemographicUpdate.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
-        # Active districts and states
+        # Active districts and states (within filter)
         active_districts = self.db.query(
             func.count(func.distinct(DemographicUpdate.district))
-        ).filter(
-            DemographicUpdate.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
         active_states = self.db.query(
             func.count(func.distinct(DemographicUpdate.state))
-        ).filter(
-            DemographicUpdate.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
-        # Top 5 states
-        top_states = self.db.query(
-            DemographicUpdate.state,
-            func.sum(DemographicUpdate.total).label('total')
-        ).filter(
-            DemographicUpdate.date >= date_30d_ago,
-            DemographicUpdate.date <= simulation_date
-        ).group_by(DemographicUpdate.state).order_by(
-            func.sum(DemographicUpdate.total).desc()
-        ).limit(5).all()
-        
-        total_30d = int(updates_30d[0] or 0)
-        
+        # Top 5 states (only if no state filter)
         top_states_list = []
-        for s in top_states:
-            percentage = (s.total / total_30d * 100) if total_30d > 0 else 0
-            top_states_list.append({
-                "state": s.state,
-                "count": int(s.total),
-                "percentage": round(percentage, 2)
-            })
+        if not state:
+            top_states = self.db.query(
+                DemographicUpdate.state,
+                func.sum(DemographicUpdate.total).label('total')
+            ).filter(*base_filter).group_by(DemographicUpdate.state).order_by(
+                func.sum(DemographicUpdate.total).desc()
+            ).limit(5).all()
+            
+            total_30d = int(updates_30d[0] or 0)
+            for s in top_states:
+                percentage = (s.total / total_30d * 100) if total_30d > 0 else 0
+                top_states_list.append({
+                    "state": s.state,
+                    "count": int(s.total),
+                    "percentage": round(percentage, 2)
+                })
         
         return {
-            "total_updates_30d": total_30d,
+            "total_updates_30d": int(updates_30d[0] or 0),
             "total_updates_7d": int(updates_7d),
             "total_updates_today": int(updates_today),
             "active_districts": active_districts,
@@ -160,7 +178,9 @@ class DemographicService:
             "top_states": top_states_list,
             "simulation_date": simulation_date.isoformat(),
             "age_5_17_total": int(updates_30d[1] or 0),
-            "age_17_plus_total": int(updates_30d[2] or 0)
+            "age_17_plus_total": int(updates_30d[2] or 0),
+            "state_filter": state,
+            "district_filter": district
         }
     
     def get_by_district(

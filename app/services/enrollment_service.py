@@ -82,81 +82,99 @@ class EnrollmentService:
         # Convert to list of dicts
         return agg_df.to_dict('records')
     
-    def get_summary(self, simulation_date: date) -> Dict[str, Any]:
+    def get_summary(
+        self,
+        simulation_date: date,
+        state: Optional[str] = None,
+        district: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Calculate KPI summary for overview page.
         
         Args:
             simulation_date: The simulated current date
+            state: Optional state filter
+            district: Optional district filter
             
         Returns:
             Dictionary with enrollment summary KPIs
         """
         # Last 30 days
         date_30d_ago = simulation_date - timedelta(days=30)
+        
+        # Build base query with optional filters
+        base_filter = [
+            Enrollment.date >= date_30d_ago,
+            Enrollment.date <= simulation_date
+        ]
+        if state:
+            base_filter.append(Enrollment.state == state)
+        if district:
+            base_filter.append(Enrollment.district == district)
+        
         enrollments_30d = self.db.query(
             func.sum(Enrollment.total),
             func.sum(Enrollment.age_0_5),
             func.sum(Enrollment.age_5_17),
             func.sum(Enrollment.age_18_plus)
-        ).filter(
-            Enrollment.date >= date_30d_ago,
-            Enrollment.date <= simulation_date
-        ).first()
+        ).filter(*base_filter).first()
         
         # Last 7 days
         date_7d_ago = simulation_date - timedelta(days=7)
-        enrollments_7d = self.db.query(
-            func.sum(Enrollment.total)
-        ).filter(
+        filter_7d = [
             Enrollment.date >= date_7d_ago,
             Enrollment.date <= simulation_date
-        ).scalar() or 0
+        ]
+        if state:
+            filter_7d.append(Enrollment.state == state)
+        if district:
+            filter_7d.append(Enrollment.district == district)
+        
+        enrollments_7d = self.db.query(
+            func.sum(Enrollment.total)
+        ).filter(*filter_7d).scalar() or 0
         
         # Today
+        filter_today = [Enrollment.date == simulation_date]
+        if state:
+            filter_today.append(Enrollment.state == state)
+        if district:
+            filter_today.append(Enrollment.district == district)
+        
         enrollments_today = self.db.query(
             func.sum(Enrollment.total)
-        ).filter(
-            Enrollment.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
-        # Active districts and states
+        # Active districts and states (within filter)
         active_districts = self.db.query(
             func.count(func.distinct(Enrollment.district))
-        ).filter(
-            Enrollment.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
         active_states = self.db.query(
             func.count(func.distinct(Enrollment.state))
-        ).filter(
-            Enrollment.date == simulation_date
-        ).scalar() or 0
+        ).filter(*filter_today).scalar() or 0
         
-        # Top 5 states by enrollment in last 30 days
-        top_states = self.db.query(
-            Enrollment.state,
-            func.sum(Enrollment.total).label('total')
-        ).filter(
-            Enrollment.date >= date_30d_ago,
-            Enrollment.date <= simulation_date
-        ).group_by(Enrollment.state).order_by(
-            func.sum(Enrollment.total).desc()
-        ).limit(5).all()
-        
-        total_30d = int(enrollments_30d[0] or 0)
-        
+        # Top 5 states by enrollment in last 30 days (only if no state filter)
         top_states_list = []
-        for s in top_states:
-            percentage = (s.total / total_30d * 100) if total_30d > 0 else 0
-            top_states_list.append({
-                "state": s.state,
-                "count": int(s.total),
-                "percentage": round(percentage, 2)
-            })
+        if not state:
+            top_states = self.db.query(
+                Enrollment.state,
+                func.sum(Enrollment.total).label('total')
+            ).filter(*base_filter).group_by(Enrollment.state).order_by(
+                func.sum(Enrollment.total).desc()
+            ).limit(5).all()
+            
+            total_30d = int(enrollments_30d[0] or 0)
+            for s in top_states:
+                percentage = (s.total / total_30d * 100) if total_30d > 0 else 0
+                top_states_list.append({
+                    "state": s.state,
+                    "count": int(s.total),
+                    "percentage": round(percentage, 2)
+                })
         
         return {
-            "total_enrollments_30d": total_30d,
+            "total_enrollments_30d": int(enrollments_30d[0] or 0),
             "total_enrollments_7d": int(enrollments_7d),
             "total_enrollments_today": int(enrollments_today),
             "active_districts": active_districts,
@@ -165,7 +183,9 @@ class EnrollmentService:
             "simulation_date": simulation_date.isoformat(),
             "age_0_5_total": int(enrollments_30d[1] or 0),
             "age_5_17_total": int(enrollments_30d[2] or 0),
-            "age_18_plus_total": int(enrollments_30d[3] or 0)
+            "age_18_plus_total": int(enrollments_30d[3] or 0),
+            "state_filter": state,
+            "district_filter": district
         }
     
     def get_by_district(
