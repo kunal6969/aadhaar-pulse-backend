@@ -180,9 +180,9 @@ def forecast_comprehensive(
     demographic_service = DemographicService(db)
     
     def generate_forecast(historical_df: pd.DataFrame, forecast_from: date, horizon_days: int):
-        """Generate simple trend + seasonality forecast."""
+        """Generate simple trend + seasonality forecast with fitted values for historical period."""
         if len(historical_df) < 7:
-            return [], []
+            return [], [], []
         
         values = historical_df['total'].values
         mean_value = values.mean()
@@ -193,16 +193,33 @@ def forecast_comprehensive(
         if len(values) >= 14:
             trend = (values[-7:].mean() - values[:7].mean()) / max(len(values) - 7, 1)
         
-        # Convert historical to list
-        historical = [
-            {
+        # Convert historical to list with fitted (predicted) values for comparison
+        historical = []
+        for idx, (_, row) in enumerate(historical_df.iterrows()):
+            # Calculate fitted value for this historical point
+            fitted = mean_value + (trend * (idx - len(values) // 2))
+            
+            # Apply weekly seasonality to fitted value
+            row_date = row['date']
+            if hasattr(row_date, 'weekday'):
+                day_of_week = row_date.weekday()
+            else:
+                from datetime import datetime
+                row_date = datetime.fromisoformat(str(row_date))
+                day_of_week = row_date.weekday()
+            
+            if day_of_week in [5, 6]:
+                fitted *= 0.7
+            
+            fitted = max(0, fitted)
+            
+            historical.append({
                 "date": row['date'].isoformat() if hasattr(row['date'], 'isoformat') else str(row['date']),
-                "actual": int(row['total'])
-            }
-            for _, row in historical_df.iterrows()
-        ]
+                "actual": int(row['total']),
+                "fitted": round(fitted, 0)
+            })
         
-        # Generate forecast
+        # Generate future forecast
         forecast = []
         for i in range(horizon_days):
             forecast_date = forecast_from + timedelta(days=i+1)
@@ -224,7 +241,18 @@ def forecast_comprehensive(
                 "upper_bound": round(upper, 0)
             })
         
-        return historical, forecast
+        # Calculate model accuracy metrics (MAPE - Mean Absolute Percentage Error)
+        mape = 0
+        if len(historical) > 0:
+            errors = []
+            for h in historical:
+                if h['actual'] > 0:
+                    error = abs(h['actual'] - h['fitted']) / h['actual'] * 100
+                    errors.append(error)
+            if errors:
+                mape = sum(errors) / len(errors)
+        
+        return historical, forecast, round(mape, 2)
     
     results = {
         "district": request.district,
@@ -240,15 +268,16 @@ def forecast_comprehensive(
             end_date=request.forecast_from,
             days_back=90
         )
-        hist, fcst = generate_forecast(enrollment_df, request.forecast_from, request.horizon_days)
+        hist, fcst, mape = generate_forecast(enrollment_df, request.forecast_from, request.horizon_days)
         results["data_types"]["enrollment"] = {
             "historical": hist,
             "forecast": fcst,
             "training_days": len(enrollment_df),
-            "historical_mean": round(enrollment_df['total'].mean(), 0) if len(enrollment_df) > 0 else 0
+            "historical_mean": round(enrollment_df['total'].mean(), 0) if len(enrollment_df) > 0 else 0,
+            "mape": mape
         }
     except Exception as e:
-        results["data_types"]["enrollment"] = {"error": str(e), "historical": [], "forecast": []}
+        results["data_types"]["enrollment"] = {"error": str(e), "historical": [], "forecast": [], "mape": 0}
     
     # Demographic forecast
     try:
@@ -257,15 +286,16 @@ def forecast_comprehensive(
             end_date=request.forecast_from,
             days_back=90
         )
-        hist, fcst = generate_forecast(demographic_df, request.forecast_from, request.horizon_days)
+        hist, fcst, mape = generate_forecast(demographic_df, request.forecast_from, request.horizon_days)
         results["data_types"]["demographic"] = {
             "historical": hist,
             "forecast": fcst,
             "training_days": len(demographic_df),
-            "historical_mean": round(demographic_df['total'].mean(), 0) if len(demographic_df) > 0 else 0
+            "historical_mean": round(demographic_df['total'].mean(), 0) if len(demographic_df) > 0 else 0,
+            "mape": mape
         }
     except Exception as e:
-        results["data_types"]["demographic"] = {"error": str(e), "historical": [], "forecast": []}
+        results["data_types"]["demographic"] = {"error": str(e), "historical": [], "forecast": [], "mape": 0}
     
     # Biometric forecast
     try:
@@ -274,12 +304,14 @@ def forecast_comprehensive(
             end_date=request.forecast_from,
             days_back=90
         )
-        hist, fcst = generate_forecast(biometric_df, request.forecast_from, request.horizon_days)
+        hist, fcst, mape = generate_forecast(biometric_df, request.forecast_from, request.horizon_days)
         results["data_types"]["biometric"] = {
             "historical": hist,
             "forecast": fcst,
             "training_days": len(biometric_df),
-            "historical_mean": round(biometric_df['total'].mean(), 0) if len(biometric_df) > 0 else 0
+            "historical_mean": round(biometric_df['total'].mean(), 0) if len(biometric_df) > 0 else 0,
+            "mape": mape
+        }
         }
     except Exception as e:
         results["data_types"]["biometric"] = {"error": str(e), "historical": [], "forecast": []}
