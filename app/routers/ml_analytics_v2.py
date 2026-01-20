@@ -263,18 +263,33 @@ def get_underserved_data(
         }
     
     if level == "national":
+        national = data.get('national', {})
+        rankings = data.get('rankings', {})
         return {
             'level': 'national',
-            'summary': data.get('national', {}),
-            'top_50_underserved': data.get('rankings', {}).get('top_50_underserved', []),
-            'mobile_unit_priority': data.get('rankings', {}).get('mobile_unit_priority', [])
+            'national': national,
+            'summary': national,
+            'rankings': {
+                'top_50_underserved': rankings.get('top_50_underserved', []),
+                'mobile_unit_priority': rankings.get('mobile_unit_priority', []),
+            },
+            'mbu_recommendations': {
+                'total_recommended': national.get('mbu_recommended_total', 0),
+                'methodology': 'Districts with underserved score > 60, low update activity, and moderate+ child population',
+                'districts': [d for d in rankings.get('top_50_underserved', []) if d.get('mbu_recommended', False)][:30],
+            },
+            'scoring_methodology': national.get('scoring_methodology', 'Relative percentile ranking across all districts')
         }
     
     if level == "state" and state:
+        state_data = data.get('by_state', {}).get(state, {})
         return {
             'level': 'state',
             'state': state,
-            'data': data.get('by_state', {}).get(state, {})
+            'data': state_data,
+            'mbu_recommended_count': state_data.get('mbu_recommended_count', 0),
+            'high_priority_districts': state_data.get('high_priority_districts', 0),
+            'medium_priority_districts': state_data.get('medium_priority_districts', 0)
         }
     
     return {

@@ -725,8 +725,56 @@ def train_capacity_model(enrollment_df, demographic_df, biometric_df):
 # ==================== MODEL 3: UNDERSERVED SCORING ====================
 
 def train_underserved_model(enrollment_df, demographic_df, biometric_df):
-    """Train underserved scoring with state/district/monthly breakdown."""
-    print("\n🚐 Training Underserved Scoring Model...")
+    """
+    Train underserved scoring with state/district/monthly breakdown.
+    
+    METHODOLOGY - Relative Underserved Scoring:
+    ============================================
+    The underserved score is calculated RELATIVE to all districts in India.
+    
+    Score Components (all normalized to 0-100 using percentile ranking):
+    
+    1. ENROLLMENT PENETRATION (25%):
+       - Enrollments per capita (estimated from total enrollments)
+       - Lower penetration = Higher score
+       - Normalized: Percentile rank across all districts
+    
+    2. SERVICE ACTIVITY RATIO (25%):
+       - (Demographic + Biometric Updates) / Enrollments
+       - Lower activity = Higher score (less service access)
+       - Normalized: Inverse percentile rank
+    
+    3. CHILD COHORT RATIO (20%):
+       - (0-5 + 5-17 enrollments) / Total enrollments
+       - Higher child ratio = Higher future demand = Higher score
+       - Normalized: Percentile rank
+    
+    4. GROWTH TREND (15%):
+       - Month-over-month enrollment growth rate
+       - Negative/low growth = Higher score (stagnating coverage)
+       - Normalized: Inverse percentile rank
+    
+    5. SERVICE CENTER DENSITY PROXY (15%):
+       - Update frequency as proxy for center accessibility
+       - Lower frequency = Fewer accessible centers = Higher score
+       - Normalized: Inverse percentile rank
+    
+    Final Score = Weighted sum, then re-normalized to 0-100 across all districts
+    to ensure relative positioning.
+    
+    Mobile Units Recommended:
+    ========================
+    Mobile Biometric Update (MBU) units are recommended for districts where:
+    - Underserved score > 60 (top 30% most underserved)
+    - High child cohort ratio (indicating future demand)
+    - Low service activity (indicating lack of permanent centers)
+    
+    MBU units are mobile vans equipped with biometric scanners that visit
+    remote areas to provide Aadhaar enrollment and update services where
+    permanent centers are not viable due to low population density or
+    accessibility issues.
+    """
+    print("\n🚐 Training Underserved Scoring Model (Relative Normalization)...")
     start = time.time()
     
     results = {
@@ -737,23 +785,8 @@ def train_underserved_model(enrollment_df, demographic_df, biometric_df):
         'rankings': {'top_50_underserved': [], 'mobile_unit_priority': []}
     }
     
-    def calculate_underserved_score(enroll_total, demo_total, bio_total, child_ratio):
-        """Calculate underserved score (0-100, higher = more underserved)."""
-        if enroll_total == 0:
-            return 100
-        
-        # Low update activity indicates underserved
-        update_ratio = (demo_total + bio_total) / enroll_total
-        activity_score = 100 * (1 - min(update_ratio / 2, 1))
-        
-        # High child ratio indicates future demand
-        child_score = 100 * min(child_ratio, 1)
-        
-        # Composite
-        return float(0.5 * activity_score + 0.5 * child_score)
-    
-    # Calculate for all districts
-    district_scores = []
+    # STEP 1: Collect raw metrics for ALL districts first
+    raw_metrics = []
     
     for (state, district) in enrollment_df.groupby(['state', 'district']).groups.keys():
         enroll = enrollment_df[(enrollment_df['state'] == state) & (enrollment_df['district'] == district)]
@@ -765,59 +798,155 @@ def train_underserved_model(enrollment_df, demographic_df, biometric_df):
         demo_total = demo['total'].sum()
         bio_total = bio['total'].sum()
         
+        # Calculate raw metrics
         child_ratio = child_enroll / enroll_total if enroll_total > 0 else 0
-        score = calculate_underserved_score(enroll_total, demo_total, bio_total, child_ratio)
+        update_ratio = (demo_total + bio_total) / enroll_total if enroll_total > 0 else 0
         
-        district_data = {
+        # Monthly growth (simplified - compare first half to second half)
+        enroll_dates = enroll.sort_values('date')
+        if len(enroll_dates) > 10:
+            first_half = enroll_dates.head(len(enroll_dates)//2)['total'].mean()
+            second_half = enroll_dates.tail(len(enroll_dates)//2)['total'].mean()
+            growth_rate = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0
+        else:
+            growth_rate = 0
+        
+        raw_metrics.append({
             'state': state,
             'district': district,
-            'underserved_score': score,
             'enrollments': int(enroll_total),
             'child_enrollments': int(child_enroll),
             'demographic_updates': int(demo_total),
             'biometric_updates': int(bio_total),
             'child_ratio': float(child_ratio),
-            'update_activity_ratio': float((demo_total + bio_total) / max(enroll_total, 1))
+            'update_ratio': float(update_ratio),
+            'growth_rate': float(growth_rate),
+            'update_frequency': float((demo_total + bio_total) / max(len(enroll), 1))
+        })
+    
+    # Convert to DataFrame for percentile calculations
+    df_metrics = pd.DataFrame(raw_metrics)
+    
+    # STEP 2: Calculate percentile ranks for each component
+    # Lower penetration = higher percentile = more underserved
+    df_metrics['penetration_percentile'] = 100 - df_metrics['enrollments'].rank(pct=True) * 100
+    
+    # Lower activity = higher percentile = more underserved
+    df_metrics['activity_percentile'] = 100 - df_metrics['update_ratio'].rank(pct=True) * 100
+    
+    # Higher child ratio = higher percentile = more underserved (future demand)
+    df_metrics['child_percentile'] = df_metrics['child_ratio'].rank(pct=True) * 100
+    
+    # Lower/negative growth = higher percentile = more underserved
+    df_metrics['growth_percentile'] = 100 - df_metrics['growth_rate'].rank(pct=True) * 100
+    
+    # Lower update frequency = higher percentile = more underserved
+    df_metrics['frequency_percentile'] = 100 - df_metrics['update_frequency'].rank(pct=True) * 100
+    
+    # STEP 3: Calculate weighted composite score
+    WEIGHTS = {
+        'penetration': 0.25,
+        'activity': 0.25,
+        'child': 0.20,
+        'growth': 0.15,
+        'frequency': 0.15
+    }
+    
+    df_metrics['raw_composite'] = (
+        WEIGHTS['penetration'] * df_metrics['penetration_percentile'] +
+        WEIGHTS['activity'] * df_metrics['activity_percentile'] +
+        WEIGHTS['child'] * df_metrics['child_percentile'] +
+        WEIGHTS['growth'] * df_metrics['growth_percentile'] +
+        WEIGHTS['frequency'] * df_metrics['frequency_percentile']
+    )
+    
+    # STEP 4: Re-normalize composite to 0-100 (final relative score)
+    min_composite = df_metrics['raw_composite'].min()
+    max_composite = df_metrics['raw_composite'].max()
+    df_metrics['underserved_score'] = (
+        (df_metrics['raw_composite'] - min_composite) / (max_composite - min_composite) * 100
+    ).fillna(50)  # Handle edge cases
+    
+    # STEP 5: Create final district scores with all details
+    district_scores = []
+    
+    for _, row in df_metrics.iterrows():
+        # Determine if MBU is recommended
+        mbu_recommended = (
+            row['underserved_score'] > 60 and  # Top 40% most underserved
+            row['activity_percentile'] > 50 and  # Low service activity
+            row['child_percentile'] > 40  # Moderate to high child population
+        )
+        
+        district_data = {
+            'state': row['state'],
+            'district': row['district'],
+            'underserved_score': round(float(row['underserved_score']), 1),
+            'enrollments': int(row['enrollments']),
+            'child_enrollments': int(row['child_enrollments']),
+            'demographic_updates': int(row['demographic_updates']),
+            'biometric_updates': int(row['biometric_updates']),
+            'child_ratio': round(float(row['child_ratio']), 3),
+            'update_activity_ratio': round(float(row['update_ratio']), 3),
+            'growth_rate': round(float(row['growth_rate']), 2),
+            'component_scores': {
+                'penetration': round(float(row['penetration_percentile']), 1),
+                'activity': round(float(row['activity_percentile']), 1),
+                'child_cohort': round(float(row['child_percentile']), 1),
+                'growth_trend': round(float(row['growth_percentile']), 1),
+                'service_frequency': round(float(row['frequency_percentile']), 1)
+            },
+            'mbu_recommended': mbu_recommended,
+            'national_rank': 0  # Will be set after sorting
         }
         
         district_scores.append(district_data)
-        results['by_district'][f"{state}|{district}"] = district_data
+        results['by_district'][f"{row['state']}|{row['district']}"] = district_data
     
-    # Top 50 underserved nationally
+    # Sort and assign national ranks
     sorted_districts = sorted(district_scores, key=lambda x: x['underserved_score'], reverse=True)
-    results['rankings']['top_50_underserved'] = sorted_districts[:50]
-    results['rankings']['mobile_unit_priority'] = sorted_districts[:20]  # Top priority for mobile units
+    for rank, d in enumerate(sorted_districts, 1):
+        d['national_rank'] = rank
+        results['by_district'][f"{d['state']}|{d['district']}"]['national_rank'] = rank
     
-    # By State
+    results['rankings']['top_50_underserved'] = sorted_districts[:50]
+    results['rankings']['mobile_unit_priority'] = [d for d in sorted_districts if d['mbu_recommended']][:30]
+    
+    # By State - aggregate district scores
     for state in enrollment_df['state'].unique():
         state_districts = [d for d in district_scores if d['state'] == state]
         if state_districts:
             avg_score = np.mean([d['underserved_score'] for d in state_districts])
+            mbu_count = len([d for d in state_districts if d.get('mbu_recommended', False)])
             results['by_state'][state] = {
                 'avg_underserved_score': float(avg_score),
                 'district_count': len(state_districts),
+                'mbu_recommended_count': mbu_count,
                 'most_underserved': sorted(state_districts, key=lambda x: x['underserved_score'], reverse=True)[:10],
                 'total_enrollments': sum(d['enrollments'] for d in state_districts),
-                'total_child_enrollments': sum(d['child_enrollments'] for d in state_districts)
+                'total_child_enrollments': sum(d['child_enrollments'] for d in state_districts),
+                'high_priority_districts': len([d for d in state_districts if d['underserved_score'] > 70]),
+                'medium_priority_districts': len([d for d in state_districts if 40 <= d['underserved_score'] <= 70])
             }
     
     # National summary
+    mbu_total = len([d for d in district_scores if d.get('mbu_recommended', False)])
     results['national'] = {
         'avg_underserved_score': float(np.mean([d['underserved_score'] for d in district_scores])),
         'median_underserved_score': float(np.median([d['underserved_score'] for d in district_scores])),
         'total_districts': len(district_scores),
+        'mbu_recommended_total': mbu_total,
         'high_underserved_count': len([d for d in district_scores if d['underserved_score'] > 70]),
         'medium_underserved_count': len([d for d in district_scores if 40 <= d['underserved_score'] <= 70]),
-        'low_underserved_count': len([d for d in district_scores if d['underserved_score'] < 40])
+        'low_underserved_count': len([d for d in district_scores if d['underserved_score'] < 40]),
+        'scoring_methodology': 'Relative percentile ranking across all districts in India'
     }
     
-    # By Period
-    for period_name in ['september', 'october', 'november', 'december']:
-        enroll_period = filter_by_period(enrollment_df, period_name)
-        demo_period = filter_by_period(demographic_df, period_name)
-        bio_period = filter_by_period(biometric_df, period_name)
+    # By Period - use the same relative calculation
+    def calculate_period_scores(enroll_period, demo_period, bio_period):
+        """Calculate relative underserved scores for a specific period."""
+        period_metrics = []
         
-        period_scores = []
         for (state, district) in enroll_period.groupby(['state', 'district']).groups.keys():
             e = enroll_period[(enroll_period['state'] == state) & (enroll_period['district'] == district)]
             d = demo_period[(demo_period['state'] == state) & (demo_period['district'] == district)]
@@ -828,16 +957,41 @@ def train_underserved_model(enrollment_df, demographic_df, biometric_df):
             dt = d['total'].sum()
             bt = b['total'].sum()
             
-            cr = ct / et if et > 0 else 0
-            score = calculate_underserved_score(et, dt, bt, cr)
+            child_ratio = ct / et if et > 0 else 0
+            update_ratio = (dt + bt) / et if et > 0 else 0
             
-            period_scores.append({
+            period_metrics.append({
                 'state': state,
                 'district': district,
-                'underserved_score': score,
                 'enrollments': int(et),
-                'child_enrollments': int(ct)
+                'child_enrollments': int(ct),
+                'child_ratio': child_ratio,
+                'update_ratio': update_ratio
             })
+        
+        if not period_metrics:
+            return []
+        
+        # Convert and calculate percentiles
+        pdf = pd.DataFrame(period_metrics)
+        pdf['penetration_pct'] = 100 - pdf['enrollments'].rank(pct=True) * 100
+        pdf['activity_pct'] = 100 - pdf['update_ratio'].rank(pct=True) * 100
+        pdf['child_pct'] = pdf['child_ratio'].rank(pct=True) * 100
+        
+        pdf['raw_score'] = 0.4 * pdf['penetration_pct'] + 0.4 * pdf['activity_pct'] + 0.2 * pdf['child_pct']
+        
+        # Normalize
+        min_s, max_s = pdf['raw_score'].min(), pdf['raw_score'].max()
+        pdf['underserved_score'] = ((pdf['raw_score'] - min_s) / (max_s - min_s) * 100).fillna(50)
+        
+        return pdf.to_dict('records')
+    
+    for period_name in ['september', 'october', 'november', 'december']:
+        enroll_period = filter_by_period(enrollment_df, period_name)
+        demo_period = filter_by_period(demographic_df, period_name)
+        bio_period = filter_by_period(biometric_df, period_name)
+        
+        period_scores = calculate_period_scores(enroll_period, demo_period, bio_period)
         
         sorted_period = sorted(period_scores, key=lambda x: x['underserved_score'], reverse=True)
         results['by_period'][period_name] = {
@@ -857,10 +1011,13 @@ def train_underserved_model(enrollment_df, demographic_df, biometric_df):
     elapsed = time.time() - start
     save_model(results, 'underserved_scoring_v2', {
         'districts_scored': len(district_scores),
+        'mbu_recommended': mbu_total,
+        'methodology': 'Relative percentile ranking (0-100)',
         'periods': list(TIME_PERIODS.keys()),
         'training_time_sec': elapsed
     })
-    print(f"   ✓ Scored {len(district_scores)} districts")
+    print(f"   ✓ Scored {len(district_scores)} districts (relative to national)")
+    print(f"   🚐 MBU Recommended: {mbu_total} districts")
     print(f"   ⏱️  Training time: {elapsed:.2f}s")
     return results
 

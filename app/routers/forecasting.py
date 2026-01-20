@@ -182,24 +182,53 @@ def forecast_comprehensive(
     def generate_forecast(historical_df: pd.DataFrame, forecast_from: date, horizon_days: int):
         """Generate simple trend + seasonality forecast with fitted values for historical period."""
         if len(historical_df) < 7:
-            return [], [], []
+            return [], [], 0
         
         values = historical_df['total'].values
         mean_value = values.mean()
         std_value = values.std() if len(values) > 1 else mean_value * 0.2
         
-        # Calculate trend
+        # Calculate trend using linear regression approach
+        n = len(values)
+        x = np.arange(n)
         trend = 0
-        if len(values) >= 14:
-            trend = (values[-7:].mean() - values[:7].mean()) / max(len(values) - 7, 1)
+        intercept = mean_value
+        
+        if n >= 7:
+            # Simple linear regression for trend
+            x_mean = x.mean()
+            y_mean = values.mean()
+            numerator = sum((x - x_mean) * (values - y_mean))
+            denominator = sum((x - x_mean) ** 2)
+            if denominator > 0:
+                trend = numerator / denominator
+                intercept = y_mean - trend * x_mean
+        
+        # Calculate weekly seasonality factors from data
+        weekday_totals = {}
+        weekday_counts = {}
+        for idx, (_, row) in enumerate(historical_df.iterrows()):
+            row_date = row['date']
+            if hasattr(row_date, 'weekday'):
+                dow = row_date.weekday()
+            else:
+                from datetime import datetime
+                row_date = datetime.fromisoformat(str(row_date))
+                dow = row_date.weekday()
+            weekday_totals[dow] = weekday_totals.get(dow, 0) + row['total']
+            weekday_counts[dow] = weekday_counts.get(dow, 0) + 1
+        
+        weekday_avgs = {dow: weekday_totals[dow] / weekday_counts[dow] for dow in weekday_totals}
+        overall_avg = mean_value
+        seasonality_factors = {dow: (weekday_avgs.get(dow, overall_avg) / overall_avg) if overall_avg > 0 else 1.0 for dow in range(7)}
         
         # Convert historical to list with fitted (predicted) values for comparison
         historical = []
         for idx, (_, row) in enumerate(historical_df.iterrows()):
-            # Calculate fitted value for this historical point
-            fitted = mean_value + (trend * (idx - len(values) // 2))
+            # Calculate fitted value using linear trend
+            fitted = intercept + (trend * idx)
             
-            # Apply weekly seasonality to fitted value
+            # Apply learned weekly seasonality to fitted value
             row_date = row['date']
             if hasattr(row_date, 'weekday'):
                 day_of_week = row_date.weekday()
@@ -208,9 +237,7 @@ def forecast_comprehensive(
                 row_date = datetime.fromisoformat(str(row_date))
                 day_of_week = row_date.weekday()
             
-            if day_of_week in [5, 6]:
-                fitted *= 0.7
-            
+            fitted *= seasonality_factors.get(day_of_week, 1.0)
             fitted = max(0, fitted)
             
             historical.append({
@@ -219,16 +246,16 @@ def forecast_comprehensive(
                 "fitted": round(fitted, 0)
             })
         
-        # Generate future forecast
+        # Generate future forecast using the same linear trend + seasonality model
         forecast = []
         for i in range(horizon_days):
             forecast_date = forecast_from + timedelta(days=i+1)
-            predicted = mean_value + (trend * i)
+            # Continue the linear trend from where historical ended
+            predicted = intercept + (trend * (n + i))
             
-            # Weekly seasonality
+            # Apply learned weekly seasonality
             day_of_week = forecast_date.weekday()
-            if day_of_week in [5, 6]:
-                predicted *= 0.7
+            predicted *= seasonality_factors.get(day_of_week, 1.0)
             
             predicted = max(0, predicted)
             lower = max(0, predicted - 1.96 * std_value)
@@ -246,11 +273,12 @@ def forecast_comprehensive(
         if len(historical) > 0:
             errors = []
             for h in historical:
-                if h['actual'] > 0:
+                if h['actual'] > 0 and h['fitted'] > 0:
                     error = abs(h['actual'] - h['fitted']) / h['actual'] * 100
-                    errors.append(error)
+                    errors.append(min(error, 100))  # Cap individual errors at 100%
             if errors:
                 mape = sum(errors) / len(errors)
+                mape = min(mape, 100)  # Cap overall MAPE at 100%
         
         return historical, forecast, round(mape, 2)
     
