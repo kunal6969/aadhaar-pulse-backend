@@ -105,18 +105,24 @@ def get_top_50_needy(
 def get_capacity_data(
     state: Optional[str] = Query(None, description="Filter by state"),
     period: Optional[str] = Query(None, description="Filter by period: september, october, november, december"),
-    level: str = Query("national", description="Level: national, state, district")
+    level: str = Query("national", description="Level: national, state, district, all_states")
 ):
     """
     Get capacity planning data with hierarchical breakdown.
     
-    - national: India-level aggregates
+    Uses Erlang-C queueing model for mathematically rigorous operator estimation.
+    
+    - national: India-level aggregates with recommended FTE operators
     - state: State-level with district rankings (requires state param)
     - district: All districts in a state (requires state param)
+    - all_states: Compare all states
     """
     data = load_model('capacity_planning_v2')
     if not data:
         raise HTTPException(status_code=404, detail="Capacity model not trained")
+    
+    # Include methodology in all responses
+    methodology = data.get('methodology', {})
     
     if period and period in data.get('by_period', {}):
         period_data = data['by_period'][period]
@@ -124,20 +130,39 @@ def get_capacity_data(
             return {
                 'period': period,
                 'state': state,
+                'methodology': methodology,
                 'data': period_data.get('by_state', {}).get(state, {}),
                 'top_districts_in_period': [d for d in period_data.get('top_50_districts', []) if d.get('state') == state][:20]
             }
         return {
             'period': period,
+            'methodology': methodology,
             'national_avg_daily': period_data.get('national_avg_daily'),
+            'national_p95_daily': period_data.get('national_p95_daily'),
+            'national_recommended_operators': period_data.get('national_recommended_operators'),
             'top_50_districts': period_data.get('top_50_districts', [])[:50]
         }
     
     if level == "national":
+        national = data.get('national', {})
         return {
             'level': 'national',
-            'data': data.get('national', {}),
-            'top_50_needy': data.get('rankings', {}).get('top_50_needy', [])
+            'methodology': methodology,
+            'summary': {
+                'avg_daily_demand': national.get('avg_daily_demand', 0),
+                'p95_daily_demand': national.get('p95_daily_demand', 0),
+                'peak_daily_demand': national.get('peak_daily_demand', 0),
+                'recommended_operators': national.get('recommended_fte_operators', national.get('operators_for_p95', 0)),
+                'peak_surge_operators': national.get('peak_surge_operators', 0),
+                'utilization': national.get('utilization_at_p95', 0),
+                'avg_wait_minutes': national.get('avg_wait_minutes', 0),
+                'service_level': national.get('service_level', 0.8),
+                'weekend_operators': national.get('weekend_operators', 0),
+                'service_capacity_per_operator': national.get('service_capacity_per_operator_per_day', 32.5)
+            },
+            'data': national,
+            'top_50_needy': data.get('rankings', {}).get('top_50_needy', []),
+            'top_50_stress': data.get('rankings', {}).get('top_50_stress', [])
         }
     
     if level == "state" and state:
@@ -146,12 +171,26 @@ def get_capacity_data(
             v for k, v in data.get('by_district', {}).items() 
             if v.get('state') == state
         ]
-        sorted_districts = sorted(districts, key=lambda x: x.get('capacity_stress_score', 0), reverse=True)
+        # Sort by capacity stress index (new metric)
+        sorted_districts = sorted(
+            districts, 
+            key=lambda x: x.get('capacity_stress_index', x.get('capacity_stress_score', 0)), 
+            reverse=True
+        )
         
         return {
             'level': 'state',
             'state': state,
-            'summary': state_data,
+            'methodology': methodology,
+            'summary': {
+                'avg_daily_demand': state_data.get('avg_daily_demand', 0),
+                'p95_daily_demand': state_data.get('p95_daily_demand', 0),
+                'recommended_operators': state_data.get('recommended_operators', 0),
+                'utilization': state_data.get('utilization', 0),
+                'avg_wait_minutes': state_data.get('avg_wait_minutes', 0),
+                'weekend_operators': state_data.get('weekend_operators', 0),
+                'district_count': state_data.get('district_count', len(districts))
+            },
             'districts': sorted_districts[:50]
         }
     
@@ -163,11 +202,32 @@ def get_capacity_data(
         return {
             'level': 'district',
             'state': state,
+            'methodology': methodology,
             'count': len(districts),
-            'districts': sorted(districts, key=lambda x: x.get('operators_needed_peak', 0), reverse=True)
+            'districts': sorted(
+                districts, 
+                key=lambda x: x.get('recommended_operators', x.get('operators_needed_peak', 0)), 
+                reverse=True
+            )
         }
     
     # Return state-level comparison
+    if level == "all_states":
+        states_summary = {}
+        for state_name, state_data in data.get('by_state', {}).items():
+            states_summary[state_name] = {
+                'recommended_operators': state_data.get('recommended_operators', state_data.get('operators_needed_avg', 0)),
+                'avg_daily_demand': state_data.get('avg_daily_demand', 0),
+                'p95_daily_demand': state_data.get('p95_daily_demand', state_data.get('peak_daily_demand', 0)),
+                'utilization': state_data.get('utilization', 0),
+                'district_count': state_data.get('district_count', 0)
+            }
+        return {
+            'level': 'all_states',
+            'methodology': methodology,
+            'states': states_summary
+        }
+    
     return {
         'level': 'all_states',
         'states': data.get('by_state', {})
