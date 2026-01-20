@@ -41,9 +41,8 @@ env/
 *.sqlite
 *.sqlite3
 
-# ML Models (large files)
-app/ml_models/trained/*.pkl
-app/ml_models/trained/*.joblib
+# ML Models - KEEP trained models for deployment
+# (metadata JSON files are small, pkl files are needed for API)
 
 # Data files (keep structure, ignore large CSVs)
 data/raw/*.csv
