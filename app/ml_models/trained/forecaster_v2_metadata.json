@@ -1,0 +1,16 @@
+{
+  "data_types": [
+    "enrollment",
+    "demographic",
+    "biometric"
+  ],
+  "periods": [
+    "september",
+    "october",
+    "november",
+    "december",
+    "all"
+  ],
+  "training_time_sec": 13.30572772026062,
+  "trained_at": "2026-01-20T07:12:35.234235"
+}

@@ -1,0 +1,11 @@
+{
+  "districts_monitored": 932,
+  "current_hotspots": 1,
+  "hotspot_list": [
+    "Janjgir - Champa"
+  ],
+  "lambda_param": 0.2,
+  "training_time_sec": 98.56229972839355,
+  "trained_at": "2026-01-20T06:34:56.770870",
+  "model_file": "C:\\Users\\Kunal\\Desktop\\UIDAI\\aadhaar-pulse-backend\\app\\ml_models\\trained\\hotspot_detector.pkl"
+}

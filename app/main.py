@@ -16,7 +16,9 @@ from app.routers import (
     forecasting,
     anomaly,
     analytics,
-    geospatial
+    geospatial,
+    ml_analytics,
+    ml_analytics_v2
 )
 import os
 import json
@@ -113,6 +115,16 @@ app.include_router(
     prefix=f"{settings.API_V1_PREFIX}/geospatial",
     tags=["Geospatial Data"]
 )
+app.include_router(
+    ml_analytics.router,
+    prefix=f"{settings.API_V1_PREFIX}/ml",
+    tags=["ML Analytics"]
+)
+app.include_router(
+    ml_analytics_v2.router,
+    prefix=f"{settings.API_V1_PREFIX}/ml-v2",
+    tags=["ML Analytics V2 (Hierarchical)"]
+)
 
 
 # Root endpoint
@@ -136,7 +148,9 @@ def root():
             "forecast": f"{settings.API_V1_PREFIX}/forecast",
             "anomaly": f"{settings.API_V1_PREFIX}/anomaly",
             "analytics": f"{settings.API_V1_PREFIX}/analytics",
-            "geospatial": f"{settings.API_V1_PREFIX}/geospatial"
+            "geospatial": f"{settings.API_V1_PREFIX}/geospatial",
+            "ml": f"{settings.API_V1_PREFIX}/ml",
+            "ml_v2_hierarchical": f"{settings.API_V1_PREFIX}/ml-v2"
         }
     }
 

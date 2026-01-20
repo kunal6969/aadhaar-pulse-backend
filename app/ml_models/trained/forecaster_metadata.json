@@ -1,0 +1,10 @@
+{
+  "data_types": [
+    "enrollment",
+    "demographic",
+    "biometric"
+  ],
+  "training_time_sec": 0.12085103988647461,
+  "trained_at": "2026-01-20T06:24:31.218636",
+  "model_file": "C:\\Users\\Kunal\\Desktop\\UIDAI\\aadhaar-pulse-backend\\app\\ml_models\\trained\\forecaster.pkl"
+}

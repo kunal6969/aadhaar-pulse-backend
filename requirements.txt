@@ -12,6 +12,10 @@ psycopg2-binary>=2.9.9
 pandas>=2.2.0
 numpy>=1.26.3
 
+# ML/Statistical Models
+scikit-learn>=1.4.0
+scipy>=1.12.0
+
 # Utilities
 python-dotenv>=1.0.0
 python-multipart>=0.0.6

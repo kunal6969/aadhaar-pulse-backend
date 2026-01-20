@@ -1,0 +1,14 @@
+{
+  "districts_projected": 1008,
+  "top_mbu_districts": [
+    "Pune",
+    "Kurnool",
+    "Thane",
+    "Nashik",
+    "Sitapur"
+  ],
+  "projection_years": 5,
+  "training_time_sec": 0.2740304470062256,
+  "trained_at": "2026-01-20T06:34:57.048146",
+  "model_file": "C:\\Users\\Kunal\\Desktop\\UIDAI\\aadhaar-pulse-backend\\app\\ml_models\\trained\\cohort_model.pkl"
+}

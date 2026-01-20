@@ -1,0 +1,13 @@
+{
+  "districts_analyzed": 920,
+  "high_risk_districts": [
+    "Chamarajanagar *",
+    "Mahrajganj",
+    "Lahaul and Spiti",
+    "HOOGHLY",
+    "Medinipur"
+  ],
+  "training_time_sec": 282.51285314559937,
+  "trained_at": "2026-01-20T06:33:15.602623",
+  "model_file": "C:\\Users\\Kunal\\Desktop\\UIDAI\\aadhaar-pulse-backend\\app\\ml_models\\trained\\fraud_detector.pkl"
+}

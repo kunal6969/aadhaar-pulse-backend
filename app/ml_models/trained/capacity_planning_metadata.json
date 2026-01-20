@@ -1,0 +1,7 @@
+{
+  "districts_trained": 1028,
+  "service_rate": 32,
+  "training_time_sec": 241.18438172340393,
+  "trained_at": "2026-01-20T06:28:32.410670",
+  "model_file": "C:\\Users\\Kunal\\Desktop\\UIDAI\\aadhaar-pulse-backend\\app\\ml_models\\trained\\capacity_planning.pkl"
+}

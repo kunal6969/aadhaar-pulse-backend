@@ -8,6 +8,8 @@ from app.routers import analytics
 from app.routers import geospatial
 from app.routers import forecasting
 from app.routers import anomaly
+from app.routers import ml_analytics
+from app.routers import ml_analytics_v2
 
 __all__ = [
     "enrollment",
@@ -17,4 +19,6 @@ __all__ = [
     "geospatial",
     "forecasting",
     "anomaly",
+    "ml_analytics",
+    "ml_analytics_v2",
 ]

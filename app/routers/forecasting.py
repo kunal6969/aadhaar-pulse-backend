@@ -312,7 +312,6 @@ def forecast_comprehensive(
             "historical_mean": round(biometric_df['total'].mean(), 0) if len(biometric_df) > 0 else 0,
             "mape": mape
         }
-        }
     except Exception as e:
         results["data_types"]["biometric"] = {"error": str(e), "historical": [], "forecast": []}
     

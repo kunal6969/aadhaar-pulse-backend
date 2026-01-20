@@ -1,0 +1,11 @@
+{
+  "total_districts": 1131,
+  "parameters": [
+    "capacity_stress",
+    "underserved",
+    "fraud_risk",
+    "hotspot_intensity",
+    "mbu_demand"
+  ],
+  "trained_at": "2026-01-20T07:52:14.086840"
+}

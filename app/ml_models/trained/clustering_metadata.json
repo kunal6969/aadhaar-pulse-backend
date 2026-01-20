@@ -1,0 +1,15 @@
+{
+  "n_clusters": 5,
+  "districts_clustered": 1028,
+  "feature_count": 12,
+  "segment_sizes": {
+    "Stable Districts": 307,
+    "High Demographic Churn": 592,
+    "High Biometric Activity": 87,
+    "Enrollment Hotspots": 19,
+    "Low Activity Districts": 23
+  },
+  "training_time_sec": 2.599184513092041,
+  "trained_at": "2026-01-20T06:33:18.205613",
+  "model_file": "C:\\Users\\Kunal\\Desktop\\UIDAI\\aadhaar-pulse-backend\\app\\ml_models\\trained\\clustering.pkl"
+}

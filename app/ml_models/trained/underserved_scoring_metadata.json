@@ -1,0 +1,13 @@
+{
+  "districts_scored": 1028,
+  "top_underserved": [
+    "Jhajjar *",
+    "Kendrapara *",
+    "Namakkal   *",
+    "punch",
+    "North East   *"
+  ],
+  "training_time_sec": 0.6695733070373535,
+  "trained_at": "2026-01-20T06:28:33.085212",
+  "model_file": "C:\\Users\\Kunal\\Desktop\\UIDAI\\aadhaar-pulse-backend\\app\\ml_models\\trained\\underserved_scoring.pkl"
+}
