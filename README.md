@@ -1989,30 +1989,6 @@ ALLOWED_ORIGINS=["https://aadhaar-pulse-react.vercel.app", "https://aadhaar-puls
 
 ---
 
-### 👨‍💻 Resume-Worthy Skills Demonstrated
-
-**Recruitment Value**:
-
-```
-✅ Backend: FastAPI, SQLAlchemy, PostgreSQL, async Python
-✅ Frontend: React 19, Next.js 16, Tailwind CSS 4, Recharts, Leaflet
-✅ Data Science: Forecasting, anomaly detection, clustering, fraud detection
-✅ DevOps: Render.com, Docker-ready, CI/CD pipelines
-✅ Architecture: Microservices, API design, database optimization
-✅ Math/Stats: Queueing theory, Benford's Law, EWMA, cohort analysis
-✅ Product: Understanding of Aadhaar ecosystem, policy analytics
-```
-
-**Interview Talking Points**:
-
-1. "I built 7 production-grade ML models for different use cases"
-2. "Implemented hierarchical forecasting to ensure geographic consistency across 650+ districts"
-3. "Used forensic statistics (Benford's Law) for fraud detection without labeled data"
-4. "Optimized database queries from 5s to 150ms via composite indexing"
-5. "Deployed to production on Render.com with PostgreSQL, auto-scaling ready"
-
----
-
 ## Deployment
 
 ### Local Deployment
